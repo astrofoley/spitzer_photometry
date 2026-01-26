@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Mac OS
+.DS_Store
+
+# Data Directories (Adjust if your config paths differ)
+data/
+output/
+diagnostics/
+
+# File extensions to ignore (safeguard against accidental adds)
+*.fits
+*.csv
+*.png
+*.pdf
