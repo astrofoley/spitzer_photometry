@@ -10,8 +10,9 @@ from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from reproject import reproject_interp
 from . import config, gp_model
+from .pmap_correction import iracpc_pmap_corr
 
-# --- PRF Utilities ---
+# ... [PRF Utilities: GRID_CENTERS, get_gaussian_kernel_array, apply_window_function, load_real_prf_file, load_interpolated_prf, load_prf unchanged] ...
 
 GRID_CENTERS = np.array([25, 77, 129, 181, 233])
 
@@ -68,7 +69,7 @@ def load_interpolated_prf(channel, x_det, y_det):
     p11 = load_real_prf_file(channel, iy, ix)
     if all(p is None for p in [p00, p10, p01, p11]):
         return get_gaussian_kernel_array(size=2001, fwhm=2.0, oversample=config.PRF_OVERSAMPLE)
-    if p00 is None: p00 = p10 if p10 else (p01 if p01 else p11) # fallback logic
+    if p00 is None: p00 = p10 if p10 else (p01 if p01 else p11)
     if p10 is None: p10 = p00;
     if p01 is None: p01 = p00;
     if p11 is None: p11 = p10
@@ -86,7 +87,7 @@ def load_prf(channel, x_det=None, y_det=None):
 
 DEBUG_DUMPED = False
 
-def generate_prf_fast(scene_wcs, raw_wcs, prf_model, ra, dec, scene_shape):
+def generate_prf_fast(scene_wcs, raw_wcs, prf_model, ra, dec, scene_shape, channel='ch1', is_full_array=False):
     global DEBUG_DUMPED
     if prf_model is None: return np.zeros(scene_shape[0]*scene_shape[1])
     
@@ -96,14 +97,12 @@ def generate_prf_fast(scene_wcs, raw_wcs, prf_model, ra, dec, scene_shape):
     prf_wcs.wcs.crval = [ra, dec]
     prf_wcs.wcs.ctype = raw_wcs.wcs.ctype
     
-    # Scale WCS for 100x oversampling
     if hasattr(raw_wcs.wcs, 'cd'):
         prf_wcs.wcs.cd = raw_wcs.wcs.cd / float(config.PRF_OVERSAMPLE)
     else:
         prf_wcs.wcs.cdelt = raw_wcs.wcs.cdelt / float(config.PRF_OVERSAMPLE)
         prf_wcs.wcs.pc = raw_wcs.wcs.pc
     
-    # Smoothing to prevent aliasing before downsampling
     zoom_factor = float(config.SUPERSAMPLE_FACTOR) / float(config.PRF_OVERSAMPLE)
     sigma = 0.5 * (1.0 / zoom_factor)
     prf_smooth = gaussian_filter(prf_model, sigma)
@@ -114,16 +113,34 @@ def generate_prf_fast(scene_wcs, raw_wcs, prf_model, ra, dec, scene_shape):
     except:
         return np.zeros(scene_shape[0]*scene_shape[1])
     
-    # CRITICAL: Normalize flux to unity
-    # The solver fits the Amplitude. The shape must sum to 1 (or close) to act as a basis.
-    # WCS reprojection preserves surface brightness, but pixel area changed 2500x.
     curr_sum = np.sum(out_arr)
     if curr_sum > 0:
         out_arr /= curr_sum
         
+    # --- Intrapixel Correction ---
+    tx, ty = raw_wcs.world_to_pixel_values(ra, dec)
+    
+    try:
+        # Strict usage: Pass Full Array flag, no periodic logic.
+        corr_val = iracpc_pmap_corr(1.0, tx, ty, channel,
+                                    pmap_dir='data/pmap_fits',
+                                    threshold_occ=False,
+                                    full_array=is_full_array)
+        
+        if np.isfinite(corr_val) and corr_val > 0:
+            gain = 1.0 / corr_val
+            out_arr *= gain
+            gain_msg = f"Gain={gain:.4f}"
+        else:
+            gain_msg = "Gain=1.0 (OOB/Masked)"
+    except Exception as e:
+        print(f"   [PMap Warning] Failed for ({tx:.2f}, {ty:.2f}): {e}")
+        gain_msg = "Gain=1.0 (Error)"
+        
     if not DEBUG_DUMPED:
         out_path = os.path.join(config.DIAGNOSTIC_DIR, 'DEBUG_PRF_GENERATED.fits')
         fits.writeto(out_path, out_arr, overwrite=True)
+        print(f"   [DEBUG PRF] Loc: ({tx:.2f}, {ty:.2f}) [Full={is_full_array}] -> {gain_msg}")
         DEBUG_DUMPED = True
 
     return out_arr.flatten()
@@ -211,9 +228,15 @@ def run_gls_solve(cutouts, stars, star_initial_fluxes, gp_params, regularization
             chan = 'ch2' if 'ch2' in entry['filename'] else 'ch1'
             w_native = entry['raw_wcs']
             
+            # --- Retrieve Full Array Flag ---
+            is_full = entry.get('is_full_array', False)
+            
             tx, ty = w_native.world_to_pixel_values(config.TRANSIENT_RA, config.TRANSIENT_DEC)
             prf_t = load_prf(chan, tx, ty)
-            col_t = generate_prf_fast(scene_wcs, w_native, prf_t, config.TRANSIENT_RA, config.TRANSIENT_DEC, scene_shape)
+            
+            # --- Pass Flag to Generator ---
+            col_t = generate_prf_fast(scene_wcs, w_native, prf_t, config.TRANSIENT_RA, config.TRANSIENT_DEC, scene_shape,
+                                      channel=chan, is_full_array=is_full)
             
             it = idx_trans + i
             H[it, it] += np.dot(col_t, col_t * w)
@@ -225,7 +248,9 @@ def run_gls_solve(cutouts, stars, star_initial_fluxes, gp_params, regularization
             for s_obj in solver_stars:
                 sx, sy = w_native.world_to_pixel_values(s_obj.ra.deg, s_obj.dec.deg)
                 prf_s = load_prf(chan, sx, sy)
-                cols_s.append(generate_prf_fast(scene_wcs, w_native, prf_s, s_obj.ra.deg, s_obj.dec.deg, scene_shape))
+                # --- Pass Flag to Generator ---
+                cols_s.append(generate_prf_fast(scene_wcs, w_native, prf_s, s_obj.ra.deg, s_obj.dec.deg, scene_shape,
+                                                channel=chan, is_full_array=is_full))
             
             if cols_s:
                 S = np.column_stack(cols_s)
@@ -302,12 +327,15 @@ def reconstruct_full_model(results, star_coords, star_fluxes, config_channel, cu
     
     for i in range(0, len(cutouts), stride):
         w_native = cutouts[i]['raw_wcs']
+        is_full = cutouts[i].get('is_full_array', False)
+        
         field = np.zeros(scene_shape[0]*scene_shape[1])
         for j in range(n):
             if star_fluxes[j] <= 0: continue
             sx, sy = w_native.world_to_pixel_values(star_coords[j].ra.deg, star_coords[j].dec.deg)
             prf = load_prf(chan, sx, sy)
-            field += generate_prf_fast(scene_wcs, w_native, prf, star_coords[j].ra.deg, star_coords[j].dec.deg, scene_shape) * star_fluxes[j]
+            field += generate_prf_fast(scene_wcs, w_native, prf, star_coords[j].ra.deg, star_coords[j].dec.deg, scene_shape,
+                                       channel=chan, is_full_array=is_full) * star_fluxes[j]
         accum += field.reshape(scene_shape)
         counts += 1
         

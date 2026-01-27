@@ -171,13 +171,28 @@ def load_data(file_pair):
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
             wcs = WCS(header)
+    
+    # --- DETECT FULL ARRAY VS SUBARRAY ---
+    # Subarray is 32x32. Full Array is 256x256.
+    naxis1 = header.get('NAXIS1', 0)
+    is_full_array = (naxis1 > 64) # Robust threshold
+            
     with fits.open(unc_path) as hdul:
         unc_data = hdul[0].data
     data = np.nan_to_num(data, nan=0.0)
     unc_data = np.nan_to_num(unc_data, nan=np.inf)
-    return {'data': data, 'sigma': unc_data, 'wcs': wcs, 'header': header, 'filename': os.path.basename(img_path), 'mjd': parse_mjd_robust(header)}
+    
+    return {
+        'data': data,
+        'sigma': unc_data,
+        'wcs': wcs,
+        'header': header,
+        'filename': os.path.basename(img_path),
+        'mjd': parse_mjd_robust(header),
+        'is_full_array': is_full_array  # <--- STORED HERE
+    }
 
-def generate_sources_for_list(file_list, is_template_run=False):
+def generate_sources_for_list(file_list, is_template=False):
     tables = []
     print(f"   Detecting sources for {len(file_list)} files...")
     for f_info in file_list:
@@ -185,7 +200,7 @@ def generate_sources_for_list(file_list, is_template_run=False):
             raw = load_data(f_info)
             data = np.ascontiguousarray(raw['data'].astype(float))
             sigma = np.ascontiguousarray(raw['sigma'].astype(float))
-            t = detect_sources(data, raw['wcs'], sigma_map=sigma, is_template=is_template_run)
+            t = detect_sources(data, raw['wcs'], sigma_map=sigma, is_template=is_template)
             if t is not None and len(t) > 0:
                 t.add_column(Column([raw['filename']] * len(t), name='filename', dtype='U'))
                 cols = ['filename'] + [c for c in t.colnames if c != 'filename']
@@ -213,7 +228,7 @@ def get_or_create_source_catalog(file_list):
     missing_files = [f for f in file_list if os.path.basename(f['image']) not in existing_files]
     if missing_files:
         print(f"   Backfilling {len(missing_files)} missing science frames...")
-        new_chunk = generate_sources_for_list(missing_files, is_template_run=False)
+        new_chunk = generate_sources_for_list(missing_files, is_template=False)
         if new_chunk:
             if catalog is None: catalog = new_chunk
             else: catalog = vstack([catalog, new_chunk])
@@ -437,12 +452,13 @@ def extract_analysis_cutouts(file_list, target_coord):
         s_cut = np.nan_to_num(s_cut, nan=np.inf)
         s_cut[(d_cut==0) & (s_cut==0)] = np.inf
         
-        # FIX: Save raw_wcs (specifically the aligned one if possible) for PRF generation
+        # Save raw_wcs and READOUT MODE for Solver
         cutouts.append({
             'data': d_cut,
             'sigma': s_cut,
             'wcs': w_small,
-            'raw_wcs': wcs_use,  # <--- CRITICAL: Saved for Solver
+            'raw_wcs': wcs_use,
+            'is_full_array': raw.get('is_full_array', False), # <--- PASSED TO SOLVER
             'mjd': raw['mjd'],
             'filename': raw['filename'],
             'epoch_id': f.get('epoch_id', 0),
