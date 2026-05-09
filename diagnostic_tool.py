@@ -1,111 +1,89 @@
 """
 diagnostic_tool.py
-Run this to benchmark the solver and visualize the system matrix.
+Benchmark the solver on synthetic cutouts (no data required) or on a small real subset.
 """
 import time
+import io
 import cProfile
 import pstats
-import io
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-from src import config, preprocessing, solver, gp_model
-from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
 
-def benchmark_solver():
-    print("=== PIPELINE BENCHMARK & DIAGNOSTICS ===")
-    
-    # 1. Load Data (Subset)
-    print("Loading subset of data...")
-    all_files = preprocessing.find_spitzer_files(config.DATA_DIR)
-    science_files, template_files = preprocessing.categorize_observations(all_files, config.SPLIT_DATE_MJD)
-    
-    # Take only 10 science frames for speed
-    science_subset = science_files[:10]
-    target = SkyCoord(config.TRANSIENT_RA, config.TRANSIENT_DEC, unit='deg')
-    
-    loaded_sci = []
-    for f in science_subset:
-        try: loaded_sci.append(preprocessing.load_data(f, target, config.STAMP_SIZE_ARCSEC))
-        except: pass
-        
-    print(f"Benchmarking with {len(loaded_sci)} frames...")
-    
-    # Generate Fake Template (Fast)
-    # We just need the WCS and a dummy array
-    temp_ref = preprocessing.load_data(template_files[0], size_arcsec=None) # Full frame reference
-    w_native = temp_ref['wcs']
-    # Create Native Grid
-    w_native.wcs.crval = [config.TRANSIENT_RA, config.TRANSIENT_DEC]
-    h, w = temp_ref['data'].shape
-    w_native.wcs.crpix = [w/2, h/2]
-    
-    # Super-Res Grid
-    w_sr = w_native.deepcopy()
-    factor = config.SUPERSAMPLE_FACTOR
-    if hasattr(w_sr.wcs, 'cd'): w_sr.wcs.cd /= factor
-    else: w_sr.wcs.cdelt /= factor
-    w_sr.wcs.crpix = [w/2 * factor, h/2 * factor]
-    sr_h, sr_w = int(h * factor), int(w * factor)
-    
-    deep_temp = np.zeros((sr_h, sr_w)) # Dummy template
-    
-    # Dummy Stars
+from src import config, solver
+
+
+def make_synthetic_cutouts(n_frames=4, n_pix=24, seed=0):
+    """Minimal cutout dicts matching preprocessing/solver expectations."""
+    rng = np.random.default_rng(seed)
+    target_ra = float(config.TRANSIENT_RA)
+    target_dec = float(config.TRANSIENT_DEC)
+    w_small = WCS(naxis=2)
+    w_small.wcs.crpix = [n_pix / 2, n_pix / 2]
+    w_small.wcs.crval = [target_ra, target_dec]
+    w_small.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    scale = config.PIXEL_SCALE / config.SUPERSAMPLE_FACTOR / 3600.0
+    w_small.wcs.cdelt = [-scale, scale]
+    w_small.wcs.pc = np.eye(2)
+
+    w_native = w_small.deepcopy()
+
+    cutouts = []
+    for i in range(n_frames):
+        d = rng.normal(1e-4, 1e-5, (n_pix, n_pix)).astype(np.float64)
+        s = np.full_like(d, 1e-5)
+        cutouts.append({
+            'data': d,
+            'sigma': s,
+            'wcs': w_small,
+            'raw_wcs': w_native,
+            'is_full_array': True,
+            'mjd': 58000.0 + i,
+            'filename': f'synthetic_ch2_{i:03d}_cbcd.fits',
+            'epoch_id': 0,
+            'is_template': (i >= n_frames // 2),
+        })
+    return cutouts, w_small
+
+
+def benchmark_solver(n_frames=4, n_pix=24, profile=False):
+    print("=== Solver benchmark (synthetic cutouts) ===")
+    cutouts, cutout_wcs = make_synthetic_cutouts(n_frames=n_frames, n_pix=n_pix)
     stars = []
-    
-    # Hyperparams
-    ell, var = 1.0, 1.0
-    
-    # --- START PROFILING ---
-    pr = cProfile.Profile()
-    pr.enable()
-    
+    star_fluxes = []
+    ell, var = 4.0, 1e-8
+    n_epochs = 1
+
+    if profile:
+        pr = cProfile.Profile()
+        pr.enable()
+
     t0 = time.time()
-    results = solver.run_gls_solve(loaded_sci, stars, (ell, var), deep_temp, w_sr)
+    results = solver.run_gls_solve(
+        cutouts,
+        stars,
+        star_fluxes,
+        {'ell': ell, 'var': var},
+        (ell, var),
+        np.zeros((n_pix, n_pix)),
+        cutout_wcs,
+        n_epochs,
+    )
     t1 = time.time()
-    
-    pr.disable()
-    # -----------------------
-    
-    print(f"\nTotal Solver Time: {t1 - t0:.2f} seconds")
-    print(f"Time per BCD: {(t1-t0)/len(loaded_sci):.2f} seconds")
-    
-    # Print Stats
-    s = io.StringIO()
-    ps = pstats.Stats(pr, stream=s).sort_stats('cumtime')
-    ps.print_stats(20) # Top 20 time-consumers
-    print("\n--- TOP BOTTLENECKS ---")
-    print(s.getvalue())
-    
-    # --- VISUALIZATION ---
-    print("Generating Diagnostic Plot (benchmark_results.pdf)...")
-    with PdfPages('benchmark_results.pdf') as pdf:
-        
-        # 1. Coverage Map
-        # Reconstruct coverage from sparse matrices inside solver?
-        # Easier: Just plot the model_scene validity (where variance is not infinite)
-        # But we don't have variance here.
-        # Let's plot the scene model itself (it will be zero, but the structure exists)
-        
-        # Better: Plot the Footprints manually
-        coverage = np.zeros((sr_h, sr_w))
-        scene_wcs = results['scene_wcs'] # This is the local scene WCS used in solver
-        
-        # Project center of each BCD onto Scene
-        fig, ax = plt.subplots(figsize=(8,8))
-        ax.imshow(coverage, origin='lower', cmap='gray_r')
-        
-        for d in loaded_sci:
-            # Simple check: Convert BCD center to Scene Pixels
-            cx, cy = d['header']['NAXIS1']/2, d['header']['NAXIS2']/2
-            ra, dec = d['wcs'].pixel_to_world_values(cx, cy)
-            sx, sy = scene_wcs.world_to_pixel_values(ra, dec)
-            ax.plot(sx, sy, 'r+', markersize=10, alpha=0.5)
-            
-        ax.set_title(f"Centroids of {len(loaded_sci)} BCDs on Scene Grid")
-        pdf.savefig(fig); plt.close()
-        
-    print("Done.")
+
+    if profile:
+        pr.disable()
+        s = io.StringIO()
+        pstats.Stats(pr, stream=s).sort_stats('cumtime').print_stats(15)
+        print("\n--- Profile (top 15) ---\n", s.getvalue())
+
+    print(f"Solve time: {t1 - t0:.3f} s ({len(cutouts)} frames)")
+    if results is None:
+        print("Solver returned None")
+        return None
+    print(f"transient flux (first): {results['transient_fluxes'][0]:.3e}")
+    print(f"transient err (first):   {results['transient_errs'][0]:.3e}")
+    return results
+
 
 if __name__ == "__main__":
-    benchmark_solver()
+    benchmark_solver(profile=False)

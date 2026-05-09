@@ -15,6 +15,7 @@ from scipy.interpolate import interp1d
 from scipy.optimize import minimize
 from reproject import reproject_interp
 from . import config
+from .native_forward import extract_native_stamp_for_target
 
 # --- HELPER FUNCTIONS ---
 
@@ -362,6 +363,9 @@ def align_frames_to_template(file_list, deep_template, template_wcs, source_cata
     ref_world_arr = np.column_stack((ref_world[0], ref_world[1]))
     ref_tree = cKDTree(ref_world_arr)
     aligned_count = 0
+    match_radius_deg = float(getattr(config, 'ALIGN_MATCH_RADIUS_DEG', 1.0e-4))
+    min_matches = int(max(3, getattr(config, 'ALIGN_MIN_MATCHES', 8)))
+    clip_sigma = float(max(0.0, getattr(config, 'ALIGN_OFFSET_CLIP_SIGMA', 3.5)))
     for f in file_list:
         fname = f['filename']
         if fname not in source_catalog: continue
@@ -373,14 +377,25 @@ def align_frames_to_template(file_list, deep_template, template_wcs, source_cata
         except: continue
         ra, dec = wcs_orig.pixel_to_world_values(xs, ys)
         bcd_world = np.column_stack((ra, dec))
-        dists, indices = ref_tree.query(bcd_world, distance_upper_bound=0.003)
+        dists, indices = ref_tree.query(bcd_world, distance_upper_bound=match_radius_deg)
         valid = dists != float('inf')
-        if np.sum(valid) < 2: continue
+        if np.sum(valid) < min_matches:
+            continue
         matched_ref_world = ref_world_arr[indices[valid]]
         ref_px, ref_py = wcs_orig.world_to_pixel_values(matched_ref_world[:, 0], matched_ref_world[:, 1])
         matched_bcd_pix = np.column_stack((xs[valid], ys[valid]))
         matched_ref_pix = np.column_stack((ref_px, ref_py))
         offsets = matched_bcd_pix - matched_ref_pix
+        if clip_sigma > 0.0 and offsets.shape[0] >= min_matches:
+            med = np.median(offsets, axis=0)
+            resid = offsets - med
+            rad = np.sqrt(np.sum(resid ** 2, axis=1))
+            mad = np.median(np.abs(rad - np.median(rad)))
+            if np.isfinite(mad) and mad > 0.0:
+                sigma_rob = 1.4826 * mad
+                keep = rad <= (clip_sigma * sigma_rob)
+                if np.sum(keep) >= min_matches:
+                    offsets = offsets[keep]
         dx = np.median(offsets[:, 0])
         dy = np.median(offsets[:, 1])
         wcs_corr = wcs_orig.deepcopy()
@@ -426,6 +441,11 @@ def flag_cosmic_rays(processed_list, deep_template, scene_wcs, target_coord):
     return count
 
 def extract_analysis_cutouts(file_list, target_coord):
+    """
+    Reproject each BCD onto a shared North-up analysis stamp (w_small, pc=I).
+    Stacking (e.g. median of template cutouts) uses these same grids; there is
+    no separate native-orientation analysis cutout in this path yet.
+    """
     print("Extracting Analysis Cutouts...")
     n_pix = int(config.ANALYSIS_BOX_SIZE * config.SUPERSAMPLE_FACTOR)
     scale = config.PIXEL_SCALE / config.SUPERSAMPLE_FACTOR / 3600.0
@@ -465,3 +485,45 @@ def extract_analysis_cutouts(file_list, target_coord):
             'is_template': f.get('is_template', False)
         })
     return cutouts, w_small
+
+
+def extract_native_analysis_cutouts(file_list, target_coord):
+    """
+    Extract centered native-detector cutouts for each BCD without resampling data values.
+
+    The cutout WCS can vary per frame (as expected for native detector geometry).
+    """
+    print("Extracting Native Analysis Cutouts (no data reprojection)...")
+    n_pix = int(config.ANALYSIS_BOX_SIZE * config.SUPERSAMPLE_FACTOR)
+    size_xy = (n_pix, n_pix)
+    cutouts = []
+    for f in file_list:
+        raw = load_data(f)
+        d_jy = raw['data'] * config.MJY_SR_TO_JY
+        s_jy = raw['sigma'] * config.MJY_SR_TO_JY
+        wcs_use = f.get('corrected_wcs', raw['wcs'])
+        d_cut, s_cut, w_cut = extract_native_stamp_for_target(
+            d_jy,
+            s_jy,
+            wcs_use,
+            target_coord,
+            size_xy,
+            fill_value=0.0,
+            fill_sigma=np.inf,
+        )
+        d_cut = np.nan_to_num(d_cut)
+        s_cut = np.nan_to_num(s_cut, nan=np.inf)
+        s_cut[(d_cut == 0) & (s_cut == 0)] = np.inf
+        cutouts.append({
+            'data': d_cut,
+            'sigma': s_cut,
+            'wcs': w_cut,
+            'raw_wcs': w_cut,
+            'is_full_array': raw.get('is_full_array', False),
+            'mjd': raw['mjd'],
+            'filename': raw['filename'],
+            'epoch_id': f.get('epoch_id', 0),
+            'is_template': f.get('is_template', False),
+        })
+    cutout_wcs = cutouts[0]['wcs'] if cutouts else None
+    return cutouts, cutout_wcs

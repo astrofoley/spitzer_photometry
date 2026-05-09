@@ -4,3 +4,4 @@ astropy
 matplotlib
 reproject
 sep
+pytest
