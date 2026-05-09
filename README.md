@@ -34,3 +34,13 @@ An automated pipeline for performing transient photometry on Spitzer Space Teles
 Run the pipeline from the root directory:
 
 ```bash
+python main.py
+```
+
+The default **`main.py`** entry point runs the **nominal native super-resolution** configuration (native BCD cutouts, combined science + template epochs, SR=2, independent-pixel scene with PRF convolution, transient as a delta with shared floated position). For flags, outputs, and tuning, see [`docs/NOMINAL_NATIVE_SCIENCE_RUN.md`](docs/NOMINAL_NATIVE_SCIENCE_RUN.md).
+
+Optional staged / template-focused driver:
+
+```bash
+python scripts/iterative_native_fit.py --help
+```

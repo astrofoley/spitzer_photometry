@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 *.so
+.venv/
+.local_env/
+
+# Editors / local tools
+.cursor/
 
 # Mac OS
 .DS_Store
