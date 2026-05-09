@@ -18,29 +18,25 @@ feat: Phase 1 publication baseline — channel clarity, WCS warnings, run manife
 
 Implements **[Phase 1](https://github.com/astrofoley/spitzer_photometry/blob/main/docs/PUBLICATION_FIX_ORDER.md)** (*Baseline honesty and tooling*): single-band clarity, reduced Astropy WCS warning noise, automatic **`run_manifest.json`**, fast pytest subset + GitHub Actions, plus SIP-aware projection cache keys and tests.
 
-### Closes (edit `#NN` to match your repo’s issue numbers)
+### Closes (verified against [open/closed issues](https://github.com/astrofoley/spitzer_photometry/issues))
 
-Replace each line with the real GitHub issue number, or delete lines that do not have an issue yet.
+Paste these lines into the PR description so GitHub links and auto-closes on merge:
 
 ```
-Closes #<!-- BUG-3 issue number -->
-Closes #<!-- BUG-1 issue number -->
-Closes #<!-- FR-7 issue number -->
-Closes #<!-- BUG-2 issue number -->
+Closes #19
+Closes #17
+Closes #16
+Closes #18
 ```
 
-**Mapping (from internal labels → [`ISSUES_FOR_GITHUB.md`](../github_issues/ISSUES_FOR_GITHUB.md)):**
+| Issue | Title (abbrev.) |
+|-------|-----------------|
+| **#19** | BUG-3 — Pipeline assumes one IRAC band per run ([issue](https://github.com/astrofoley/spitzer_photometry/issues/19)) |
+| **#17** | BUG-1 — `cdelt` ignored / WCS warnings ([issue](https://github.com/astrofoley/spitzer_photometry/issues/17)); this PR also adds **SIP-aware projection cache** fingerprints (same engineering theme). |
+| **#16** | FR-7 — Run manifest ([issue](https://github.com/astrofoley/spitzer_photometry/issues/16)) |
+| **#18** | BUG-2 — Pytest markers / CI ([issue](https://github.com/astrofoley/spitzer_photometry/issues/18)) |
 
-| Label | Typical title contains |
-|-------|-------------------------|
-| **BUG-3** | Pipeline / one IRAC band / `CHANNEL` |
-| **BUG-1** | `cdelt` ignored / WCS warning spam |
-| **FR-7** | run manifest / reproducibility |
-| **BUG-2** | pytest slow / markers / CI |
-
-Optional related (no closing keyword unless you filed separate issues):
-
-- **BUG-1b / projection cache:** SIP fingerprint for `_PROJECTION_CACHE` — same PR as BUG-1 or split into its own issue.
+If you prefer not to close all four from one PR, remove the corresponding `Closes #NN` line or use `Related to #NN` instead.
 
 ### What changed
 
