@@ -15,6 +15,10 @@ from astropy.wcs import WCS
 
 from src import config, solver
 
+# PRF spread assertions are sensitive to astropy/WCS `cd` handling; keep in full
+# suite / local deep runs (see Phase 1 `pytest -m "not slow"`).
+pytestmark = pytest.mark.slow
+
 
 # ---------------------------------------------------------------------------
 # PRF pixel scale used in tests.

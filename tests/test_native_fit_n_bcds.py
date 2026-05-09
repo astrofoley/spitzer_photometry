@@ -321,6 +321,7 @@ def _write_native_fit_pdf(n_bcd: int, cutouts, results):
     return out_pdf
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("n_bcd", [1, 2, 10])
 def test_native_fit_runs_for_n_bcds(n_bcd: int):
     n_pix = 48

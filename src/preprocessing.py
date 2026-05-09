@@ -268,9 +268,17 @@ def find_spitzer_files(root_dir):
     file_list = []
     cbcd_files = glob.glob(os.path.join(root_dir, '**', '*cbcd.fits'), recursive=True)
     for img_path in cbcd_files:
-        if not is_correct_channel(img_path, config.CHANNEL): continue
+        if not is_correct_channel(img_path, config.CHANNEL):
+            continue
         unc_path = img_path.replace('cbcd.fits', 'cbunc.fits')
         file_list.append({'image': img_path, 'unc': unc_path, 'filename': os.path.basename(img_path)})
+    n_all = len(cbcd_files)
+    n_keep = len(file_list)
+    if n_all > 0 and n_keep < n_all:
+        print(
+            f"   [Channel] config.CHANNEL={config.CHANNEL!r}: using {n_keep}/{n_all} *cbcd.fits "
+            f"(skipped files are for the other IRAC band or do not match the channel pattern).",
+        )
     return file_list
 
 def filter_off_chip_frames(file_list, target_ra, target_dec):

@@ -2,7 +2,10 @@ import os
 import subprocess
 import sys
 
+import pytest
 
+
+@pytest.mark.slow
 def test_iterative_native_fit_smoke(tmp_path):
     script = os.path.join("scripts", "iterative_native_fit.py")
     out_dir = tmp_path / "campaign"
@@ -28,6 +31,7 @@ def test_iterative_native_fit_smoke(tmp_path):
     assert (out_dir / "final_run_summary.md").exists()
 
 
+@pytest.mark.slow
 def test_iterative_native_fit_n1_only_smoke(tmp_path):
     script = os.path.join("scripts", "iterative_native_fit.py")
     out_dir = tmp_path / "campaign_n1"
@@ -50,6 +54,7 @@ def test_iterative_native_fit_n1_only_smoke(tmp_path):
     assert "N1 only" in p.stdout
 
 
+@pytest.mark.slow
 def test_iterative_native_fit_n2_only_smoke(tmp_path):
     script = os.path.join("scripts", "iterative_native_fit.py")
     out_dir = tmp_path / "campaign_n2"

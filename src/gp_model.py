@@ -2,6 +2,7 @@
 import warnings
 import numpy as np
 from scipy.optimize import minimize
+import scipy.sparse as sps
 from scipy.spatial.distance import pdist, squareform
 from . import config
 
@@ -43,6 +44,15 @@ def build_scene_prior_inverse(n_scene, ell, var, scene_shape, ell2=None, var2=No
     Falls back to diagonal if n_scene exceeds config.MAX_SCENE_PIXELS.
     """
     use_two_scale = (ell2 is not None) and (var2 is not None)
+
+    ktype = str(getattr(config, "GP_KERNEL_TYPE", "matern")).strip().lower()
+    if ktype == "diagonal":
+        eps = float(getattr(config, "GP_DIAGONAL_EPS", 1e-10))
+        return sps.diags(
+            np.full(int(n_scene), eps, dtype=np.float64),
+            format="csr",
+            dtype=np.float64,
+        )
 
     if n_scene > config.MAX_SCENE_PIXELS:
         smooth = float(max(0.0, getattr(config, 'GP_FALLBACK_NEIGHBOR_SMOOTHNESS', 0.0)))

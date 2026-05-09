@@ -124,6 +124,11 @@ USE_NUCLEAR_POINT_SOURCE = False
 NUCLEAR_POINT_RA = 197.448762
 NUCLEAR_POINT_DEC = -23.383962
 NUCLEAR_POINT_NONNEGATIVE = True
+# Nuclear point ΔRA/ΔDec subpixel solve (requires solver support for extra state).
+FLOAT_NUCLEAR_POINT_POSITION = False
+NUCLEAR_POINT_POS_RIDGE = 1e6
+# Two-scale GP scene: clamp component amplitudes nonnegative (default True).
+GP_COMPONENTS_NONNEGATIVE = True
 # Optional sky center for extended galaxy QA (annulus masks in diagnostics). None = disabled.
 GALAXY_EXTENDED_CENTER_RA = 197.448762
 GALAXY_EXTENDED_CENTER_DEC = -23.383962
@@ -136,6 +141,9 @@ GALAXY_QA_ANNULUS_OUTER_PX = 14.0
 MAX_SCENE_PIXELS = 25000
 # Scene GP stationary kernel: "matern32" (smooth) or "matern12" (exponential / rougher).
 GP_MATERN_ORDER = "matern32"
+# Precision build: "matern" (default Matérn) or "diagonal" (sparse ε·I, diagnostics / tests).
+GP_KERNEL_TYPE = "matern"
+GP_DIAGONAL_EPS = 1e-10
 # For large scenes that trigger GP fallback, optionally add nearest-neighbor smoothness
 # in the precision matrix (Laplacian-style) to avoid unstable pixel-to-pixel artifacts.
 # 0.0 keeps strictly diagonal fallback.

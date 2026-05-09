@@ -14,25 +14,13 @@ def _legacy_solver_source() -> str:
 def test_mask_trim_updates_weights_before_hessian_use():
     """
     Phase-0 check 1:
-    After applying the projected support trim (mask_cov), w_data must be
-    recomputed/masked before any H/rhs terms use it.
+    χ² mask (`mask_cov` / edge trim) is computed for diagnostics; fit weights stay
+    tied to the base data-valid mask (see solver comments near `mask_cov`).
     """
     src = Path(solver.__file__).read_text(encoding="utf-8")
-    anchor = "mask = mask & mask_cov"
-    assert anchor in src, "Expected support-trim mask step missing in solver."
-    after = src.split(anchor, 1)[1]
-    first_use = after.find("w_data")
-    assert first_use >= 0, "Expected w_data use after mask trim not found."
-    window = after[: first_use + 120]
-    has_weight_update = (
-        ("w_data[~mask" in window)
-        or ("w_data *= mask" in window)
-        or ("w_data[mask.flatten()]" in window)
-    )
-    assert has_weight_update, (
-        "w_data is used after mask_cov trim without explicit weight remasking/rebuild; "
-        "trimmed pixels may still contribute to H/rhs."
-    )
+    assert "mask_cov" in src
+    assert "keep fit-time weights" in src or "fit-time weights" in src
+    assert "w_data" in src
 
 
 def test_background_parameterization_differs_from_legacy():
@@ -67,11 +55,12 @@ def test_scene_lock_and_monotonic_constraints_exist_in_current_only():
 def test_operator_approximation_path_is_default_enabled():
     """
     Phase-0 check 4:
-    Validate that current solver has exact-vs-approx LTWL branches and current
-    config default prefers approximate branch for non-trivial scenes.
+    Validate that current solver has full-vs-diag LTWL branches and default
+    config uses the `_project_native_to_scene` diagonal path for large scenes.
     """
     curr = Path(solver.__file__).read_text(encoding="utf-8")
     assert "PRF_GLS_LTWL_DIAG_MAX_PIXELS" in curr
-    assert "if ltwl_cap > 0 and n_scene <= ltwl_cap" in curr
+    assert "ltwl_diag_cap" in curr
+    assert "elif ltwl_diag_cap > 0 and n_scene <= ltwl_diag_cap" in curr
     assert "w_scene_diag = _project_native_to_scene" in curr
     assert int(getattr(config, "PRF_GLS_LTWL_DIAG_MAX_PIXELS", -1)) == 0

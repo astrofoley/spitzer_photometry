@@ -13,7 +13,7 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.utils.exceptions import AstropyWarning
 
-from . import config, diagnostics, gp_model, native_fit_campaign, preprocessing, solver
+from . import config, diagnostics, gp_model, native_fit_campaign, preprocessing, run_manifest, solver
 
 warnings.simplefilter('ignore', category=AstropyWarning)
 
@@ -42,8 +42,9 @@ def run_pipeline_fit_core(*, skip_pre_analysis_check: bool = False):
         print("No template files; abort.")
         return None
 
-    with fits.open(tpl_files[0]['image']) as hdul:
-        chan_str = 'ch2' if 'ch2' in tpl_files[0]['image'] else 'ch1'
+    # Effective band comes from `config.CHANNEL`; filenames still match via
+    # `find_spitzer_files` / `is_correct_channel` (no infer-from-path ambiguity).
+    chan_str = str(config.CHANNEL).lower()
 
     full_list = []
     for f in sci_files:
@@ -224,6 +225,16 @@ def run_pipeline_fit_core(*, skip_pre_analysis_check: bool = False):
         print(f"   Star {i}: {flux:.4e} Jy")
 
     stretch_mask = diagnostics.diagnostic_stretch_mask(cutouts, cutouts[0]['data'].shape)
+
+    run_manifest.write_run_manifest(
+        os.path.join(config.OUTPUT_DIR, "run_manifest.json"),
+        [f["image"] for f in full_list],
+        extra={
+            "chan_str": chan_str,
+            "n_epochs": n_epochs,
+            "n_cutouts": len(cutouts),
+        },
+    )
 
     return {
         'cutouts': cutouts,
