@@ -31,3 +31,30 @@ gh pr create --base main --title "Nominal native SR run: docs, comments, PR prep
 ```
 
 Adjust the branch name and PR body as needed. Do not commit `data/`, `output/`, `.venv/`, or large scratch trees (see `.gitignore`).
+
+## Approve and merge (example: PR #9)
+
+For [PR #9](https://github.com/astrofoley/spitzer_photometry/pull/9) (“feat: native SR pipeline docs, comments, integrated science defaults”), GitHub reported **mergeable** / **clean** with respect to `main` at creation time. To ship:
+
+1. Review the **Files changed** tab.
+2. **Approve** if your workflow requires it, then **Merge pull request** (choose merge or squash to taste).
+
+## After merge — update your local clone
+
+```bash
+git checkout main
+git pull origin main
+git branch -d feature/nominal-native-science-docs-pr   # safe after merge; omit if you keep the branch
+```
+
+Optional: delete the remote feature branch from GitHub (**Branches** page or “Delete branch” on the merged PR).
+
+## Verification before merge
+
+Quick syntax check:
+
+```bash
+python -m py_compile main.py src/pipeline_fit.py src/config.py
+```
+
+Full tests (`pytest tests/`) can be slow; run when you have time and data/PRF layout available.
