@@ -29,6 +29,10 @@ An automated pipeline for performing transient photometry on Spitzer Space Teles
 3.  Set `PRF_DIR` to the folder containing your PRF FITS files.
 4.  Set `OUTPUT_DIR` and `DIAGNOSTIC_DIR` for results.
 
+**IRAC channel:** Set `CHANNEL` to `'ch1'` or `'ch2'`. The pipeline only ingests BCDs matching that band (`find_spitzer_files` / `is_correct_channel`); other-band files under `DATA_DIR` are skipped. Outputs (e.g. deep template FITS names) use this setting, not filename heuristics.
+
+**Reproducibility:** After a successful fit, `output/run_manifest.json` records the git commit, a snapshot of config, Python/package versions, and the list of input `*cbcd.fits` paths.
+
 ## Usage
 
 Run the pipeline from the root directory:
@@ -43,4 +47,18 @@ Optional staged / template-focused driver:
 
 ```bash
 python scripts/iterative_native_fit.py --help
+```
+
+## Tests
+
+Fast subset (recommended for CI and local pre-commit):
+
+```bash
+pytest -m "not slow" --tb=short
+```
+
+Full suite including slower integration-style cases:
+
+```bash
+pytest --tb=short
 ```

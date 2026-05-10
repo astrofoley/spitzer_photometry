@@ -19,6 +19,15 @@ from reproject import reproject_interp
 from . import config, gp_model
 from .pmap_correction import iracpc_pmap_corr
 
+# Spitzer BCD headers often list both CD and CDELT; Astropy prefers CD and
+# emits repetitive "cdelt ignored" warnings whenever the WCS is inspected.
+for _cls in (RuntimeWarning, UserWarning):
+    warnings.filterwarnings(
+        "ignore",
+        category=_cls,
+        message=r".*[Cc]delt.*[Ii]gnored.*",
+    )
+
 _log = logging.getLogger(__name__)
 _GEOMETRY_CACHE = {}
 _PROJECTION_CACHE = {}
@@ -464,6 +473,31 @@ def _wcs_key(w: WCS):
     )
 
 
+def _sip_distortion_fingerprint(w: WCS) -> tuple:
+    """
+    Fingerprint FITS SIP distortion for the sparse projection-operator cache.
+
+    Linear parameters are already hashed in ``_wcs_key``; including SIP avoids
+    reusing a cached projection matrix when two frames share the same linear
+    astrometry but differ in distortion polynomials.
+    """
+    sip = getattr(w, "sip", None)
+    if sip is None:
+        return ("nosip",)
+    parts = []
+    for name in ("a", "b", "ap", "bp"):
+        arr = getattr(sip, name, None)
+        if arr is None:
+            parts.append((name, None))
+            continue
+        parts.append((name, tuple(np.asarray(arr, dtype=np.float64).ravel().tolist())))
+    return ("sip", tuple(parts))
+
+
+def _wcs_projection_cache_key(w: WCS) -> tuple:
+    return (_wcs_key(w), _sip_distortion_fingerprint(w))
+
+
 def _projection_matrix(scene_wcs: WCS, native_wcs: WCS, scene_shape, native_shape):
     """
     Build sparse projection operator P such that:
@@ -475,7 +509,12 @@ def _projection_matrix(scene_wcs: WCS, native_wcs: WCS, scene_shape, native_shap
     """
     scene_shape = (int(scene_shape[0]), int(scene_shape[1]))
     native_shape = (int(native_shape[0]), int(native_shape[1]))
-    key = (_wcs_key(scene_wcs), _wcs_key(native_wcs), scene_shape, native_shape)
+    key = (
+        _wcs_projection_cache_key(scene_wcs),
+        _wcs_projection_cache_key(native_wcs),
+        scene_shape,
+        native_shape,
+    )
     M = _PROJECTION_CACHE.get(key)
     if M is not None:
         return M
